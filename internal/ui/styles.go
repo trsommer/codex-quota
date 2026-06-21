@@ -8,6 +8,9 @@ var (
 			Foreground(lipgloss.Color("205")).
 			MarginBottom(1)
 
+	TitleCountStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244"))
+
 	TabActiveStyle = lipgloss.NewStyle().
 			Bold(true).
 			Underline(true).
@@ -115,6 +118,9 @@ var (
 	CompactExhaustedHeaderStyle = lipgloss.NewStyle().
 					Bold(true).
 					Foreground(lipgloss.Color("251"))
+
+	CompactScrollIndicatorStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("244"))
 	BarEmptyStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("238"))
 )

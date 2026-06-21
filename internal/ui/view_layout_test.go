@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1140,4 +1141,37 @@ func testModelWithWindows(windows []api.QuotaWindow) Model {
 	model.Loading = false
 	model.Data = api.UsageData{Windows: windows}
 	return model
+}
+
+func TestRenderHeader_ShowsAccountCount(t *testing.T) {
+	cases := []struct {
+		name     string
+		accounts int
+		want     string
+	}{
+		{"zero accounts", 0, "· 0"},
+		{"single account", 1, "· 1"},
+		{"many accounts", 42, "· 42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			accs := make([]*config.Account, tc.accounts)
+			for i := 0; i < tc.accounts; i++ {
+				accs[i] = &config.Account{
+					Key:    fmt.Sprintf("acc-%d", i),
+					Label:  fmt.Sprintf("user%d@example.com", i),
+					Source: config.SourceManaged,
+				}
+			}
+			m := InitialModel(accs, map[string][]string{}, map[string][]string{}, true)
+
+			out := ansi.Strip(m.renderHeader())
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("expected header to contain %q, got %q", tc.want, out)
+			}
+			if !strings.Contains(out, "🚀 Codex Quota") {
+				t.Fatalf("expected header to still contain the title, got %q", out)
+			}
+		})
+	}
 }

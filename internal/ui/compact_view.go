@@ -30,43 +30,127 @@ func (m Model) renderCompactView() string {
 		normalRows = append(normalRows, i)
 	}
 
-	var s strings.Builder
-	m.renderCompactRows(&s, normalRows, accountWidth)
-
-	if len(exhaustedRows) > 0 {
-		if len(normalRows) > 0 {
-			s.WriteString("\n")
+	// The compact list is rendered as: [normal rows], then a blank line
+	// followed by the "Exhausted accounts" header (only when both lists
+	// are non-empty), then the exhausted rows. Each row is one line.
+	hasExhausted := len(exhaustedRows) > 0
+	hasNormal := len(normalRows) > 0
+	headerLines := 0
+	if hasExhausted {
+		headerLines++ // the "Exhausted accounts" line itself
+		if hasNormal {
+			headerLines++ // the blank separator
 		}
-		s.WriteString(CompactExhaustedHeaderStyle.Render("Exhausted accounts"))
+	}
+
+	totalRows := len(normalRows) + len(exhaustedRows)
+	availableRows := m.compactAvailableRows() - headerLines
+	if availableRows < 1 {
+		availableRows = 1
+	}
+
+	scroll := m.CompactScroll
+	if scroll < 0 {
+		scroll = 0
+	}
+	maxScroll := totalRows - availableRows
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+
+	var s strings.Builder
+	canScroll := totalRows > availableRows
+	if canScroll && scroll > 0 {
+		fmt.Fprintf(&s, "%s\n",
+			CompactScrollIndicatorStyle.Render(
+				fmt.Sprintf("↑ %d more", scroll),
+			),
+		)
+	}
+
+	end := scroll + availableRows
+	if end > totalRows {
+		end = totalRows
+	}
+
+	// Map each row position to an account index. The exhausted section
+	// starts at len(normalRows) in the position space.
+	rowIndexAt := func(pos int) int {
+		if pos < len(normalRows) {
+			return normalRows[pos]
+		}
+		return exhaustedRows[pos-len(normalRows)]
+	}
+	isExhaustedPos := func(pos int) bool {
+		return pos >= len(normalRows)
+	}
+
+	headerEmitted := false
+	if canScroll && hasExhausted {
+		// If the visible window starts inside (or just past) the normal
+		// section, emit the header when we first reach the boundary. If
+		// the window starts inside the exhausted section, emit the
+		// header at the top of the visible area so the section label
+		// is still shown.
+		if scroll >= len(normalRows) {
+			fmt.Fprintf(&s, "%s\n",
+				CompactExhaustedHeaderStyle.Render("Exhausted accounts"),
+			)
+			headerEmitted = true
+		}
+	}
+
+	for pos := scroll; pos < end; pos++ {
+		if !headerEmitted && hasExhausted && isExhaustedPos(pos) {
+			if hasNormal {
+				s.WriteString("\n")
+			}
+			fmt.Fprintf(&s, "%s\n",
+				CompactExhaustedHeaderStyle.Render("Exhausted accounts"),
+			)
+			headerEmitted = true
+		}
+		m.renderCompactRowLine(&s, rowIndexAt(pos), accountWidth)
+	}
+
+	if canScroll && end < totalRows {
+		downCount := totalRows - end
 		s.WriteString("\n")
-		m.renderCompactRows(&s, exhaustedRows, accountWidth)
+		fmt.Fprintf(&s, "%s\n",
+			CompactScrollIndicatorStyle.Render(
+				fmt.Sprintf("↓ %d more", downCount),
+			),
+		)
 	}
 
 	return s.String()
 }
 
-func (m Model) renderCompactRows(s *strings.Builder, rowIndexes []int, accountWidth int) {
+// renderCompactRowLine renders a single account row, applying the same
+// truncation rules used by the unsliced list renderer.
+func (m Model) renderCompactRowLine(s *strings.Builder, accIdx int, accountWidth int) {
+	if accIdx < 0 || accIdx >= len(m.Accounts) {
+		return
+	}
+	acc := m.Accounts[accIdx]
+	if acc == nil {
+		return
+	}
+	row := m.renderCompactAccountRow(accIdx, acc, accountWidth)
+	// Guard against style-induced line wraps on very narrow terminals.
+	row = strings.ReplaceAll(row, "\n", " ")
 	limit := m.preferredContentWidth()
 	if limit <= 0 && m.Width > 0 {
 		limit = m.Width
 	}
-	for _, i := range rowIndexes {
-		if i < 0 || i >= len(m.Accounts) {
-			continue
-		}
-		acc := m.Accounts[i]
-		if acc == nil {
-			continue
-		}
-		row := m.renderCompactAccountRow(i, acc, accountWidth)
-		// Guard against style-induced line wraps on very narrow terminals.
-		row = strings.ReplaceAll(row, "\n", " ")
-		if limit > 0 && ansi.StringWidth(row) > limit {
-			row = ansi.Cut(row, 0, limit)
-		}
-		s.WriteString(row)
-		s.WriteString("\n")
+	if limit > 0 && ansi.StringWidth(row) > limit {
+		row = ansi.Cut(row, 0, limit)
 	}
+	s.WriteString(row)
+	s.WriteString("\n")
 }
 
 func (m Model) renderCompactAccountRow(index int, acc *config.Account, accountWidth int) string {
@@ -253,4 +337,176 @@ func (m Model) compactRowLayout(leftWidth int) (barWidth, percentWidth, resetWid
 	percentWidth = reduce(percentWidth, minPercentWidth)
 
 	return
+}
+
+// compactAvailableRows returns how many text rows the compact list can
+// safely render given the current terminal height. The estimate includes
+// space for the surrounding chrome (header, footer, frame padding and
+// the title/footer margins). When the terminal height is unknown or
+// unusually small we fall back to a large value so nothing is truncated.
+func (m Model) compactAvailableRows() int {
+	const chromeLines = 9
+	if m.Height <= 0 {
+		return 1 << 30
+	}
+	available := m.Height - chromeLines
+	if available < 3 {
+		return 3
+	}
+	return available
+}
+
+// clampCompactScroll keeps CompactScroll within the valid range for the
+// current list size and terminal height.
+func (m *Model) clampCompactScroll() {
+	if !m.CompactMode || len(m.Accounts) == 0 {
+		m.CompactScroll = 0
+		return
+	}
+	total := len(m.Accounts)
+	available := m.compactAvailableRows()
+	// Subtract space taken by the exhausted header when both sections
+	// could be present; this matches the renderer.
+	hasExhausted := false
+	for _, acc := range m.Accounts {
+		if acc != nil && m.isCompactAccountExhausted(acc.Key) {
+			hasExhausted = true
+			break
+		}
+	}
+	headerLines := 0
+	if hasExhausted {
+		headerLines = 2
+		hasNormal := false
+		for _, acc := range m.Accounts {
+			if acc != nil && !m.isCompactAccountExhausted(acc.Key) {
+				hasNormal = true
+				break
+			}
+		}
+		if !hasNormal {
+			headerLines = 1
+		}
+	}
+	visible := available - headerLines
+	if visible < 1 {
+		visible = 1
+	}
+	maxScroll := total - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if m.CompactScroll < 0 {
+		m.CompactScroll = 0
+	}
+	if m.CompactScroll > maxScroll {
+		m.CompactScroll = maxScroll
+	}
+}
+
+// ensureCompactActiveVisible adjusts CompactScroll so the currently
+// active account is inside the visible window. Call after changing
+// ActiveAccountIx in compact mode.
+func (m *Model) ensureCompactActiveVisible() {
+	if !m.CompactMode || len(m.Accounts) == 0 {
+		m.CompactScroll = 0
+		return
+	}
+	pos := m.compactActiveRowPosition()
+	if pos < 0 {
+		m.CompactScroll = 0
+		return
+	}
+	visible := m.compactAvailableRows()
+	hasExhausted := false
+	for _, acc := range m.Accounts {
+		if acc != nil && m.isCompactAccountExhausted(acc.Key) {
+			hasExhausted = true
+			break
+		}
+	}
+	headerLines := 0
+	if hasExhausted {
+		headerLines = 2
+		hasNormal := false
+		for _, acc := range m.Accounts {
+			if acc != nil && !m.isCompactAccountExhausted(acc.Key) {
+				hasNormal = true
+				break
+			}
+		}
+		if !hasNormal {
+			headerLines = 1
+		}
+	}
+	visible -= headerLines
+	if visible < 1 {
+		visible = 1
+	}
+	total := len(m.Accounts)
+	maxScroll := total - visible
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+
+	if m.CompactScroll > pos {
+		m.CompactScroll = pos
+	}
+	if m.CompactScroll < pos-visible+1 {
+		m.CompactScroll = pos - visible + 1
+	}
+	if m.CompactScroll > maxScroll {
+		m.CompactScroll = maxScroll
+	}
+	if m.CompactScroll < 0 {
+		m.CompactScroll = 0
+	}
+}
+
+// compactActiveRowPosition returns the index of the active account in
+// the same order the compact list renders rows (normal accounts first,
+// then exhausted accounts). It returns -1 when the active account
+// cannot be located.
+func (m Model) compactActiveRowPosition() int {
+	if m.ActiveAccountIx < 0 || m.ActiveAccountIx >= len(m.Accounts) {
+		return -1
+	}
+	active := m.Accounts[m.ActiveAccountIx]
+	if active == nil {
+		return -1
+	}
+	pos := 0
+	for _, acc := range m.Accounts {
+		if acc == nil {
+			continue
+		}
+		if m.isCompactAccountExhausted(acc.Key) {
+			continue
+		}
+		if acc.Key == active.Key {
+			return pos
+		}
+		pos++
+	}
+	pos = 0
+	for _, acc := range m.Accounts {
+		if acc == nil {
+			continue
+		}
+		if !m.isCompactAccountExhausted(acc.Key) {
+			continue
+		}
+		if acc.Key == active.Key {
+			// Skip past the normal section count.
+			normalCount := 0
+			for _, a := range m.Accounts {
+				if a != nil && !m.isCompactAccountExhausted(a.Key) {
+					normalCount++
+				}
+			}
+			return normalCount + pos
+		}
+		pos++
+	}
+	return -1
 }

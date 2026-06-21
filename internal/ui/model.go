@@ -59,6 +59,7 @@ type Model struct {
 	UpdateAvailableHint     string
 	pendingUpdateMethod     update.Method
 	hasPendingUpdateMethod  bool
+	CompactScroll           int
 }
 
 type StartupUpdatePrompt struct {
@@ -301,11 +302,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.defaultProgress.Width = barWidth
 		m.shortProgress.Width = barWidth
 
+		m.clampCompactScroll()
+
 	case AccountsMsg:
 		m.Accounts = msg.Accounts
 		m.SourcesByAccountID = msg.SourcesByAccountID
 		m.ActiveSourcesByIdentity = msg.ActiveSourcesByIdentity
 		m.ActiveAccountIx = 0
+		m.CompactScroll = 0
 		m.Data = api.UsageData{}
 		m.pruneCompactBarAnimations()
 		m.pruneKnownPlanTypes()

@@ -193,6 +193,8 @@ func (m Model) toggleViewMode() (tea.Model, tea.Cmd) {
 	m.resetDeleteState()
 	m.resetApplyState()
 	m.Notice = ""
+	m.CompactScroll = 0
+	m.ensureCompactActiveVisible()
 	return m, tea.Batch(m.fetchNextCmd(), m.ensureAnimationTickCmd(), SaveUIStateSnapshotCmd(m.uiStateSnapshot()))
 }
 

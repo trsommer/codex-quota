@@ -62,6 +62,7 @@ func (m *Model) moveActiveAccountCompact(delta int) {
 	}
 	if pos == -1 {
 		m.ActiveAccountIx = order[0]
+		m.ensureCompactActiveVisible()
 		return
 	}
 
@@ -70,6 +71,7 @@ func (m *Model) moveActiveAccountCompact(delta int) {
 		next += len(order)
 	}
 	m.ActiveAccountIx = order[next]
+	m.ensureCompactActiveVisible()
 }
 
 func (m *Model) syncActiveAccount() {
@@ -88,6 +90,7 @@ func (m *Model) syncActiveAccount() {
 			if !m.CompactMode {
 				m.startTabWindowAnimationsFromZero(acc.Key, data, tabSwitchAnimationDuration)
 			}
+			m.ensureCompactActiveVisible()
 			return
 		}
 	}
@@ -105,6 +108,7 @@ func (m *Model) normalizeActiveAccountForView(activeKey string) {
 		for i, account := range m.Accounts {
 			if account != nil && account.Key == activeKey {
 				m.ActiveAccountIx = i
+				m.ensureCompactActiveVisible()
 				return
 			}
 		}
@@ -113,6 +117,7 @@ func (m *Model) normalizeActiveAccountForView(activeKey string) {
 	if m.CompactMode {
 		if order := m.compactVisualOrderIndices(); len(order) > 0 {
 			m.ActiveAccountIx = order[0]
+			m.ensureCompactActiveVisible()
 			return
 		}
 	}

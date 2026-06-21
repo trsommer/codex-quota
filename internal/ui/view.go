@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -101,7 +102,9 @@ func (m Model) preferredContentWidth() int {
 }
 
 func (m Model) renderHeader() string {
-	return TitleStyle.Render("🚀 Codex Quota")
+	title := TitleStyle.Render("🚀 Codex Quota")
+	count := TitleCountStyle.Render(fmt.Sprintf(" · %d", len(m.Accounts)))
+	return lipgloss.JoinHorizontal(lipgloss.Left, title, count)
 }
 
 func (m Model) renderFooter() string {
